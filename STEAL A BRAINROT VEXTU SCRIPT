@@ -1,0 +1,706 @@
+--// VEXTU 100% SEGURO
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local StarterGui = game:GetService("StarterGui")
+local SoundService = game:GetService("SoundService")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local player = Players.LocalPlayer
+
+-- =====================
+-- ESP Dinámico
+-- =====================
+local activeESP = {}
+local espEnabled = false
+local charConnections = {}
+
+local function rgb()
+    local hue = tick() % 5 / 5
+    return Color3.fromHSV(hue, 1, 1)
+end
+
+local function applyESP(character)
+    if not character or activeESP[character] then return end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "VextuESP"
+    highlight.FillTransparency = 1
+    highlight.OutlineTransparency = 0
+    highlight.OutlineColor = rgb()
+    highlight.Parent = character
+    activeESP[character] = highlight
+end
+
+RunService.RenderStepped:Connect(function()
+    for char, hl in pairs(activeESP) do
+        if hl and hl.Parent then
+            hl.OutlineColor = rgb()
+        end
+    end
+end)
+
+local function toggleESP(state)
+    espEnabled = state
+    if not state then
+        for _, hl in pairs(activeESP) do if hl then hl:Destroy() end end
+        activeESP = {}
+        for _, conn in pairs(charConnections) do conn:Disconnect() end
+        charConnections = {}
+        return
+    end
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr.Character then applyESP(plr.Character) end
+        local conn = plr.CharacterAdded:Connect(function(char)
+            if espEnabled then applyESP(char) end
+        end)
+        table.insert(charConnections, conn)
+    end
+end
+
+-- =====================
+-- ESP MODELOS / NPC CON BLOQUEO/DESBLOQUEO
+-- =====================
+
+local workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+
+-- Nombres exactos de modelos para resaltar
+local npcNames = {"PlotBlock", "Boss", "Guard"}
+
+local activeESPModels = {}
+local espNPCEnabled = false
+local espNPCConn
+
+-- Crear o actualizar BillboardGui con Bloqueado/Desbloqueado según "structure base home"
+local function updateBillboard(model)
+    local hrp = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA("BasePart")
+    if not hrp then return end
+
+    local bb = model:FindFirstChild("VextuESPBillboard")
+    if not bb then
+        bb = Instance.new("BillboardGui")
+        bb.Name = "VextuESPBillboard"
+        bb.Size = UDim2.new(0, 120, 0, 50)
+        bb.AlwaysOnTop = true
+        bb.StudsOffset = Vector3.new(0, 3, 0)
+        bb.Parent = model
+
+        local textLabel = Instance.new("TextLabel")
+        textLabel.Name = "ESPText"
+        textLabel.Size = UDim2.new(1, 0, 1, 0)
+        textLabel.BackgroundTransparency = 1
+        textLabel.TextScaled = true
+        textLabel.Font = Enum.Font.SourceSansBold
+        textLabel.Parent = bb
+    end
+
+    local textLabel = bb:FindFirstChild("ESPText")
+    local blocked = false
+
+    -- Revisar si hay un objeto "home" cerca de X = -42
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj:IsA("Model") and obj.Name:lower() == "structure base home" then
+            local objHRP = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChildWhichIsA("BasePart")
+            if objHRP and math.abs(objHRP.Position.X - (-42)) < 5 then -- radio de ±5 studs
+                blocked = true
+                break
+            end
+        end
+    end
+
+    textLabel.Text = blocked and "Bloqueado" or "Desbloqueado"
+
+    -- Rojo si bloqueado, rainbow si desbloqueado
+    if blocked then
+        textLabel.TextColor3 = Color3.new(1, 0, 0)
+    else
+        textLabel.TextColor3 = Color3.new(0, 1, 0)
+    end
+end
+
+-- Función auxiliar para color de Highlight (puedes personalizar)
+local function rgb()
+    return Color3.fromRGB(255, 255, 255)
+end
+
+-- Aplicar ESP a un modelo
+local function applyESPModel(model)
+    if not model or activeESPModels[model] then return end
+    local hrp = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA("BasePart")
+    if not hrp then return end
+
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "VextuESPModel"
+    highlight.FillTransparency = 1
+    highlight.OutlineTransparency = 0
+    highlight.OutlineColor = rgb()
+    highlight.Parent = model
+    highlight.Adornee = hrp
+
+    activeESPModels[model] = highlight
+end
+
+-- Actualización constante de Highlight y Billboard
+RunService.RenderStepped:Connect(function()
+    if espNPCEnabled then
+        for model, hl in pairs(activeESPModels) do
+            if hl and hl.Parent then
+                hl.OutlineColor = rgb()
+                updateBillboard(model)
+            end
+        end
+    end
+end)
+
+-- Activar / desactivar ESP
+local function toggleESPNPC(state)
+    espNPCEnabled = state
+    if not state then
+        for model, hl in pairs(activeESPModels) do
+            if hl then hl:Destroy() end
+            local bb = model:FindFirstChild("VextuESPBillboard")
+            if bb then bb:Destroy() end
+        end
+        activeESPModels = {}
+        if espNPCConn then espNPCConn:Disconnect() espNPCConn = nil end
+        return
+    end
+
+    -- Aplicar ESP a modelos existentes
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj:IsA("Model") and table.find(npcNames, obj.Name) then
+            applyESPModel(obj)
+        end
+    end
+
+    -- Detectar nuevos modelos
+    espNPCConn = workspace.DescendantAdded:Connect(function(obj)
+        if espNPCEnabled and obj:IsA("Model") and table.find(npcNames, obj.Name) then
+            applyESPModel(obj)
+        end
+    end)
+end
+
+
+
+-- =====================
+-- CONFIGURACIÓN
+-- =====================
+local LOCAL_KEY = "VextuV1"
+local EXPIRATION_DATE = "2025-09-10"
+
+local savedSettings = {
+    wallhackNames = false,
+    freezeplayers = false,
+    teleportplayers = false,
+    jumpBoost = false,
+    antiLag = false,
+    playerSpeed = 16,
+    espPlayer = false,
+    autoFloor = false,
+    empuje = false
+}
+
+-- =====================
+-- UTILS
+-- =====================
+local function showNotification(text)
+    StarterGui:SetCore("SendNotification", {
+        Title = "VEXTU SCRIPT",
+        Text = text,
+        Duration = 2
+    })
+end
+
+-- 🔊 Función única y segura
+local function playSound(id)
+    local sound = Instance.new("Sound")
+    sound.SoundId = id
+    sound.Volume = 1
+    sound.Parent = player:WaitForChild("PlayerGui") -- aseguramos que se escuche
+    sound:Play()
+    game:GetService("Debris"):AddItem(sound, 2) -- limpiar después de 2s
+end
+
+local function isExpired()
+    local year, month, day = EXPIRATION_DATE:match("(%d+)-(%d+)-(%d+)")
+    local expTime = os.time({year=tonumber(year), month=tonumber(month), day=tonumber(day), hour=0})
+    return os.time() > expTime
+end
+
+-- =====================
+-- GUI PRINCIPAL
+-- =====================
+local function createMainGUI()
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "NeonHackerUI"
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.IgnoreGuiInset = true
+    ScreenGui.Parent = player:WaitForChild("PlayerGui")
+
+    local MainFrame = Instance.new("Frame", ScreenGui)
+    MainFrame.Size = UDim2.new(0,300,0,40)
+    MainFrame.Position = UDim2.new(0.3,0,0.3,0)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(15,15,30)
+    MainFrame.Active = true
+    MainFrame.Draggable = true
+    Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0,15)
+    local UIStroke = Instance.new("UIStroke", MainFrame)
+    UIStroke.Thickness = 2
+    UIStroke.Color = Color3.fromRGB(180,0,255)
+
+    local Title = Instance.new("TextLabel", MainFrame)
+    Title.Size = UDim2.new(1, -40, 0, 30) -- un poco más bajo que 35
+    Title.Position = UDim2.new(0, 10, 0, 0)
+    Title.Text = "VEXTU BRAINROT V1ㅤㅤ"
+    Title.Font = Enum.Font.Code
+    Title.TextSize = 18 -- tamaño de fuente fijo (más pequeño que el auto-scaled)
+    Title.TextColor3 = Color3.fromRGB(180,0,255)
+    Title.BackgroundTransparency = 1
+
+    local MinBtn = Instance.new("TextButton", MainFrame)
+    MinBtn.Text = "-"
+    MinBtn.Size = UDim2.new(0,35,0,35)
+    MinBtn.Position = UDim2.new(1,-70,0,0)
+    MinBtn.BackgroundTransparency = 1
+    MinBtn.TextColor3 = Color3.fromRGB(200,0,255)
+    MinBtn.Font = Enum.Font.Code
+    MinBtn.TextScaled = true
+
+    local CloseBtn = Instance.new("TextButton", MainFrame)
+    CloseBtn.Text = "X"
+    CloseBtn.Size = UDim2.new(0,35,0,35)
+    CloseBtn.Position = UDim2.new(1,-35,0,0)
+    CloseBtn.BackgroundTransparency = 1
+    CloseBtn.TextColor3 = Color3.fromRGB(200,0,255)
+    CloseBtn.Font = Enum.Font.Code
+    CloseBtn.TextScaled = true
+
+    local OptionsFrame = Instance.new("Frame", MainFrame)
+    OptionsFrame.Size = UDim2.new(1,-20,1,-40)
+    OptionsFrame.Position = UDim2.new(0,10,0,40)
+    OptionsFrame.BackgroundTransparency = 1
+    OptionsFrame.ClipsDescendants = true
+    local UIList = Instance.new("UIListLayout", OptionsFrame)
+    UIList.Padding = UDim.new(0,12)
+    UIList.SortOrder = Enum.SortOrder.LayoutOrder
+
+    -- Switch genérico con beep
+local function createSwitch(name, setting, onEnable, onDisable)
+    local frame = Instance.new("Frame", OptionsFrame)
+    frame.Size = UDim2.new(1,0,0,35)
+    frame.BackgroundColor3 = Color3.fromRGB(25,25,50)
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0,12)
+
+    local label = Instance.new("TextLabel", frame)
+    label.Size = UDim2.new(0.7,0,1,0)
+    label.Text = name
+    label.TextColor3 = Color3.fromRGB(180,180,255)
+    label.Font = Enum.Font.Code
+    label.TextSize = 18
+    label.BackgroundTransparency = 1
+    label.TextXAlignment = Enum.TextXAlignment.Left
+
+    local button = Instance.new("TextButton", frame)
+    button.Size = UDim2.new(0.28,0,0.7,0)
+    button.Position = UDim2.new(0.7,0,0.15,0)
+    button.BackgroundColor3 = savedSettings[setting] and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,0,0)
+    Instance.new("UICorner", button).CornerRadius = UDim.new(0,10)
+    button.AutoButtonColor = true
+    button.Text = ""
+    
+
+    button.MouseButton1Click:Connect(function()
+        savedSettings[setting] = not savedSettings[setting]
+        button.BackgroundColor3 = savedSettings[setting] and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,0,0)
+
+        -- 🔊 beep al activar/desactivar
+        playSound("rbxassetid://911882371")
+
+        showNotification(name .. (savedSettings[setting] and " Activado" or " Desactivado"))
+        if savedSettings[setting] and onEnable then onEnable() end
+        if not savedSettings[setting] and onDisable then onDisable() end
+        
+    end)
+end
+
+    -- Botón genérico
+    local function createButton(name, callback)
+        local frame = Instance.new("Frame", OptionsFrame)
+        frame.Size = UDim2.new(1,0,0,35)
+        frame.BackgroundColor3 = Color3.fromRGB(25,25,50)
+        Instance.new("UICorner", frame).CornerRadius = UDim.new(0,12)
+
+        local button = Instance.new("TextButton", frame)
+        button.Size = UDim2.new(1,0,1,0)
+        button.Text = name
+        button.TextColor3 = Color3.fromRGB(180,180,255)
+        button.Font = Enum.Font.Code
+        button.TextSize = 18
+        button.BackgroundTransparency = 1
+        button.MouseButton1Click:Connect(callback)
+    end
+
+    -- Opciones
+    -- =====================
+-- ESP NAME SWITCH
+-- =====================
+local activeESPName = {}
+local hue = 0
+
+local function applyESPName(character)
+    local plr = game:GetService("Players"):GetPlayerFromCharacter(character)
+    if not character or not plr then return end
+    local head = character:FindFirstChild("Head")
+    if not head then return end
+
+    -- Si el ESP ya existe, no hacer nada
+    if activeESPName[plr] then return end
+
+    -- Crear BillboardGui
+    local b = Instance.new("BillboardGui")
+    b.Name = "ESPName"
+    b.Size = UDim2.new(0, 150, 0, 25)
+    b.StudsOffset = Vector3.new(0, 3, 0)
+    b.AlwaysOnTop = true
+    b.Parent = head
+
+    local t = Instance.new("TextLabel", b)
+    t.Size = UDim2.new(1, 0, 1, 0)
+    t.BackgroundTransparency = 1
+    t.Text = plr.Name
+    t.Font = Enum.Font.Code
+    t.TextScaled = true
+    t.TextStrokeTransparency = 0
+
+    activeESPName[plr] = t
+end
+
+-- Animación rainbow
+game:GetService("RunService").RenderStepped:Connect(function()
+    if savedSettings.wallhackNames then
+        hue = (hue + 1) % 360
+        local color = Color3.fromHSV(hue/360, 1, 1)
+        for _, label in pairs(activeESPName) do
+            if label and label.Parent then
+                label.TextColor3 = color
+            end
+        end
+    end
+end)
+
+-- Switch funcional
+createSwitch("ESP Name", "wallhackNames",
+    function() -- ON
+        savedSettings.wallhackNames = true
+        -- Aplicar a todos los jugadores actuales
+        for _, plr in pairs(game:GetService("Players"):GetPlayers()) do
+            if plr.Character then
+                applyESPName(plr.Character)
+                -- Conectar a futuros personajes
+                plr.CharacterAdded:Connect(applyESPName)
+            end
+        end
+    end,
+    function() -- OFF
+        savedSettings.wallhackNames = false
+        -- Limpiar todos los ESPs
+        for plr, label in pairs(activeESPName) do
+            if label and label.Parent then
+                label.Parent:Destroy()
+            end
+        end
+        activeESPName = {}
+    end
+)
+    createSwitch("ESP Player", "espPlayer", function() toggleESP(true) end, function() toggleESP(false) end)
+    
+    createSwitch("Jump high v1", "jumpBoost",      
+    function()      
+        playSound("rbxassetid://911882371")
+
+        if not _G.jumpBoostLoop then      
+            local jumpAccumulated = 63      
+            local maxJump = 10000000      
+            _G.jumpBoostLoop = RunService.RenderStepped:Connect(function()      
+                if not savedSettings.jumpBoost or not player.Character then return end      
+                local humanoid = player.Character:FindFirstChild("Humanoid")      
+                local hrp = player.Character:FindFirstChild("HumanoidRootPart")      
+                if humanoid and hrp then      
+                    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then      
+                        jumpAccumulated = math.clamp(jumpAccumulated+1,0,maxJump)      
+                    end      
+                    if jumpAccumulated > 0 then      
+                        hrp.Velocity = Vector3.new(hrp.Velocity.X, jumpAccumulated/2, hrp.Velocity.Z)      
+                        jumpAccumulated = jumpAccumulated - 1      
+                    end      
+                end      
+            end)      
+        end      
+    end,      
+    function()      
+        playSound("rbxassetid://911882371")
+        if _G.jumpBoostLoop then      
+            _G.jumpBoostLoop:Disconnect()      
+            _G.jumpBoostLoop = nil      
+        end      
+    end      
+)
+
+-- Anti Lag
+createSwitch("Anti Lag", "antiLag",
+    function()
+        -- Apagar efectos visuales pesados
+        for _, v in pairs(workspace:GetDescendants()) do
+            if v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Smoke") or v:IsA("Fire") then
+                v.Enabled = false
+            elseif v:IsA("Explosion") then
+                v.Visible = false
+            end
+        end
+
+        -- Opcional: bajar calidad de iluminación
+        game.Lighting.GlobalShadows = false
+        game.Lighting.FogEnd = 9999
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    end,
+    function()
+        -- Restaurar efectos visuales
+        for _, v in pairs(workspace:GetDescendants()) do
+            if v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Smoke") or v:IsA("Fire") then
+                v.Enabled = true
+            elseif v:IsA("Explosion") then
+                v.Visible = true
+            end
+        end
+
+        -- Restaurar iluminación
+        game.Lighting.GlobalShadows = true
+        game.Lighting.FogEnd = 1000
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+    end
+)
+
+-- Switch Auto Floor
+createSwitch("Auto Floor", "autoFloor",
+    function()
+        playSound("rbxassetid://911882371")
+
+        if not _G.autoFloorLoop then
+            _G.autoFloorParts = {}
+
+            _G.autoFloorLoop = RunService.RenderStepped:Connect(function()
+                if not savedSettings.autoFloor or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
+
+                local root = player.Character.HumanoidRootPart
+                local floor = Instance.new("Part")
+                floor.Size = Vector3.new(6,1,6)
+                floor.Anchored = true
+                floor.CanCollide = true
+                floor.Material = Enum.Material.Neon
+                floor.Color = Color3.fromRGB(90, 0, 140) -- Morado oscuro
+                floor.CFrame = CFrame.new(root.Position.X, root.Position.Y - 4, root.Position.Z)
+
+                floor.Parent = workspace
+                table.insert(_G.autoFloorParts, floor)
+
+                -- borrar después de 3 segundos para que no quede infinito
+                game.Debris:AddItem(floor, 3)
+            end)
+        end
+    end,
+
+    function()
+        playSound("rbxassetid://911882371")
+
+        if _G.autoFloorLoop then
+            _G.autoFloorLoop:Disconnect()
+            _G.autoFloorLoop = nil
+        end
+
+        -- eliminar todas las partes creadas
+        if _G.autoFloorParts then
+            for _, part in pairs(_G.autoFloorParts) do
+                if part and part.Parent then
+                    part:Destroy()
+                end
+            end
+            _G.autoFloorParts = nil
+        end
+    end
+)
+-- 🗡️ Auto-Hit
+createSwitch("Auto Hit", "autohitothers",
+    function()
+        playSound("rbxassetid://911882371")
+        local char = player.Character
+        if not char then return end
+
+        -- Bucle para golpear automáticamente
+        _G.autoHitLoop = RunService.RenderStepped:Connect(function()
+            if not savedSettings.autohitothers then return end
+
+            -- Intentar usar herramienta si hay
+            local tool = char:FindFirstChildOfClass("Tool")
+            if tool then
+                pcall(function()
+                    tool:Activate()
+                end)
+            end
+
+            -- Opcional: detectar otros jugadores y hacer algo
+            for _, otherPlayer in pairs(game:GetService("Players"):GetPlayers()) do
+                if otherPlayer ~= player and otherPlayer.Character and otherPlayer.Character:FindFirstChildOfClass("Humanoid") then
+                    local hum = otherPlayer.Character:FindFirstChildOfClass("Humanoid")
+                    -- Aquí puedes aplicar daño o activar la herramienta sobre ellos si el juego lo permite
+                    -- ej: hum:TakeDamage(1) (solo si quieres simular golpes)
+                end
+            end
+        end)
+    end,
+    function()
+        playSound("rbxassetid://911882371")
+        if _G.autoHitLoop then
+            _G.autoHitLoop:Disconnect()
+            _G.autoHitLoop = nil
+        end
+    end
+)
+
+-- BOTÓN: Auto Move X caminando
+createButton("Auto Lock", function()
+    local char = player.Character
+    if not char then return end
+
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid.Health = 0 -- reinicia personaje
+    end
+
+    -- esperar respawn
+    player.CharacterAdded:Wait()
+    task.wait(1)
+
+    char = player.Character
+    if not char then return end
+
+    local hrp = char:WaitForChild("HumanoidRootPart", 5)
+    humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not humanoid then return end
+
+    -- posición objetivo inicial sumando 51 a X
+    local targetPosition = hrp.Position + Vector3.new(51, 0, 0)
+
+    -- mover el humanoide hacia la posición objetivo
+    humanoid:MoveTo(targetPosition)
+
+    -- esperar hasta que llegue al destino
+    humanoid.MoveToFinished:Wait()
+end)
+
+    -- Ajustar altura
+    local function adjustHeight()
+        MainFrame.Size = UDim2.new(0,300,0,40 + UIList.AbsoluteContentSize.Y + 10)
+    end
+    UIList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(adjustHeight)
+    adjustHeight()
+
+    -- Minimizar
+    local minimized = false
+    MinBtn.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        local targetSize = minimized and UDim2.new(0,300,0,40) or UDim2.new(0,300,0,40 + UIList.AbsoluteContentSize.Y + 10)
+        local targetPos = minimized and UDim2.new(0,10,0,20) or UDim2.new(0,10,0,40)
+        TweenService:Create(MainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {Size=targetSize}):Play()
+        TweenService:Create(OptionsFrame, TweenInfo.new(0.4,Enum.EasingStyle.Sine,Enum.EasingDirection.Out), {Position=targetPos}):Play()
+    end)
+
+    -- Cerrar
+    CloseBtn.MouseButton1Click:Connect(function()
+        local tweenSize = TweenService:Create(MainFrame, TweenInfo.new(0.25,Enum.EasingStyle.Quad,Enum.EasingDirection.In), {Size=UDim2.new(0,0,0,0)})
+        local tweenFade = TweenService:Create(MainFrame, TweenInfo.new(0.25), {BackgroundTransparency=1})
+        tweenSize:Play()
+        tweenFade:Play()
+        tweenSize.Completed:Connect(function() ScreenGui:Destroy() end)
+    end)
+
+    return ScreenGui
+end
+
+-- =====================
+-- LOGIN
+-- =====================
+local function createLoginGUI()
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "VextuLoginUI"
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.IgnoreGuiInset = true
+    ScreenGui.Parent = player:WaitForChild("PlayerGui")
+
+    local Frame = Instance.new("Frame", ScreenGui)
+    Frame.Size = UDim2.new(0,0,0,0)
+    Frame.Position = UDim2.new(0.5,-150,0.4,-75)
+    Frame.BackgroundColor3 = Color3.fromRGB(20,20,40)
+    Frame.BorderSizePixel = 0
+    Instance.new("UICorner", Frame).CornerRadius = UDim.new(0,15)
+
+    TweenService:Create(Frame,TweenInfo.new(0.5,Enum.EasingStyle.Sine,Enum.EasingDirection.Out),{Size=UDim2.new(0,300,0,150)}):Play()
+
+    local Title = Instance.new("TextLabel", Frame)
+    Title.Size = UDim2.new(1,0,0,35)
+    Title.Position = UDim2.new(0,0,0,5)
+    Title.Text = "VEXTU LOGIN"
+    Title.Font = Enum.Font.Code
+    Title.TextScaled = true
+    Title.TextColor3 = Color3.fromRGB(180,0,255)
+    Title.BackgroundTransparency = 1
+
+    local TextBox = Instance.new("TextBox", Frame)
+    TextBox.Size = UDim2.new(0.8,0,0,40)
+    TextBox.Position = UDim2.new(0.1,0,0,60)
+    TextBox.PlaceholderText = "Ingresa tu key..."
+    TextBox.ClearTextOnFocus = false
+    TextBox.TextColor3 = Color3.fromRGB(200,200,255)
+    TextBox.BackgroundColor3 = Color3.fromRGB(30,30,60)
+    TextBox.Font = Enum.Font.Code
+    TextBox.TextSize = 18
+    Instance.new("UICorner", TextBox).CornerRadius = UDim.new(0,12)
+    TextBox.Text = ""
+
+    local Submit = Instance.new("TextButton", Frame)
+    Submit.Size = UDim2.new(0.5,0,0,35)
+    Submit.Position = UDim2.new(0.25,0,0,110)
+    Submit.Text = "Ingresar"
+    Submit.Font = Enum.Font.Code
+    Submit.TextColor3 = Color3.fromRGB(180,180,255)
+    Submit.BackgroundColor3 = Color3.fromRGB(50,0,100)
+    Instance.new("UICorner", Submit).CornerRadius = UDim.new(0,12)
+
+    Submit.MouseButton1Click:Connect(function()
+        local userKey = TextBox.Text
+        if userKey == LOCAL_KEY then
+            if isExpired() then
+                showNotification("La key ha expirado!")
+                return
+            end
+            
+            TweenService:Create(Frame,TweenInfo.new(0.4,Enum.EasingStyle.Quad,Enum.EasingDirection.In),{Size=UDim2.new(0,0,0,0)}):Play()
+            task.delay(0.5,function()
+                ScreenGui:Destroy()
+                createMainGUI()
+                showNotification("Key correcta! Bienvenido a VEXTU BRAINROT.")
+            end)
+        else
+            
+            showNotification("Key incorrecta! Intenta de nuevo.")
+        end
+    end)
+
+    return ScreenGui
+end
+
+-- =====================
+-- START
+-- =====================
+createLoginGUI()
